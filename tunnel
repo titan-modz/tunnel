@@ -116,8 +116,8 @@ ssh -i "$KEY_FILE" \
 -o StrictHostKeyChecking=no \
 -o UserKnownHostsFile=/dev/null \
 -o ExitOnForwardFailure=yes \
--o ServerAliveInterval=300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 \
--o ServerAliveCountMax=3000 \
+-o ServerAliveInterval=100w \
+-o ServerAliveCountMax=30 \
 -o ConnectTimeout=10 \
 -N -f \
 -R 0:localhost:$port \
