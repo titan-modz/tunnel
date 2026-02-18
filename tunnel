@@ -1,6 +1,6 @@
 #!/bin/bash
 # ══════════════════════════════════════════════════════════════════
-#  KelpNodes Tunnel v2.0 - Advanced Port Forwarding
+#  KelpNodes Tunnel v2.1 - Persistent 24/7 Port Forwarding
 # ══════════════════════════════════════════════════════════════════
 
 SERVER="57.128.42.40"
@@ -20,11 +20,11 @@ RED="\e[31m"; GRN="\e[32m"; YEL="\e[33m"; CYN="\e[36m"; WHT="\e[97m"
 GRY="\e[90m"; BOLD="\e[1m"; DIM="\e[2m"; UNDER="\e[4m"; BLINK="\e[5m"; RST="\e[0m"
 
 # ══════════════════════════════════════════════════════════════════
-#  EMBEDDED RESTRICTED SSH KEY (can ONLY forward ports)
+#  EMBEDDED RESTRICTED SSH KEY
 # ══════════════════════════════════════════════════════════════════
 setup_key(){
-if [ ! -f "$KEY_FILE" ];then
-cat>"$KEY_FILE"<<'KEY'
+if [ ! -f "$KEY_FILE" ]; then
+cat >"$KEY_FILE"<<'KEY'
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
 QyNTUxOQAAACBJEK7mHycRjc8BFmcqL7PjJFgcDaRhFaDPinB8fjS54wAAAJhiOSxDYjks
@@ -38,45 +38,24 @@ fi
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  DISPLAY FUNCTIONS
+#  DISPLAY
 # ══════════════════════════════════════════════════════════════════
-
 banner(){
 clear
 echo -e "${GRN}${BOLD}"
 echo "   ╔════════════════════════════════════════════════════╗"
-echo "   ║                                                    ║"
-echo "   ║        ${WHT}⚡  KelpNodes Tunnel v2.0  ⚡${GRN}         ║"
-echo "   ║                                                    ║"
-echo "   ║         ${DIM}Secure Port Forwarding Service${GRN}          ║"
-echo "   ║                                                    ║"
+echo "   ║        ⚡  KelpNodes Tunnel v2.1  ⚡              ║"
 echo "   ╚════════════════════════════════════════════════════╝"
 echo -e "${RST}"
-echo -e "${GRY}${DIM}   Server: $SERVER  •  🔒 Secure  •  Status: ${GRN}ONLINE${RST}"
-echo
-}
-
-box(){
-local msg="$1"
-local color="${2:-$GRN}"
-echo -e "${color}${BOLD}"
-echo "   ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
-echo "   ┃   $msg"
-echo "   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
-echo -e "${RST}"
-}
-
-dots(){
-printf "   ${CYN}$1${RST}"
-for i in 1 2 3;do printf ".";sleep 0.15;done
+echo -e "${GRY}${DIM}   Server: $SERVER  •  24/7 Persistent Mode${RST}"
 echo
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  TUNNEL OPERATIONS
+#  PERSISTENT TUNNEL
 # ══════════════════════════════════════════════════════════════════
-
 start_tunnel(){
+
 local port="$1"
 local pid_file="$PID_DIR/tunnel-$port.pid"
 local map_file="$CONFIG_DIR/.port-$port"
@@ -84,76 +63,60 @@ local log_file="$LOG_DIR/tunnel-$port.log"
 
 banner
 
-if [ $port -lt 1 ]||[ $port -gt 65535 ];then
-echo -e "   ${RED}✗${RST} ${BOLD}Invalid port${RST} (must be 1-65535)"
-return 1
+if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+echo -e "${RED}Invalid port (1-65535)${RST}"
+exit 1
 fi
 
-if [ -f "$pid_file" ];then
+if [ -f "$pid_file" ]; then
 local pid=$(cat "$pid_file")
-if kill -0 "$pid" 2>/dev/null;then
-local remote=$(cat "$map_file" 2>/dev/null||echo "?")
-echo -e "   ${YEL}⚠${RST} Tunnel already active for port ${BOLD}$port${RST}"
-echo
-echo -e "   ${CYN}🔗${RST} Public URL: ${GRN}${BOLD}http://$SERVER:$remote${RST}"
-echo
-return 0
+if kill -0 "$pid" 2>/dev/null; then
+echo -e "${YEL}Tunnel already running for port $port${RST}"
+exit 0
 fi
 fi
 
 setup_key
 
-echo -e "   ${CYN}🚀${RST} ${BOLD}Starting Tunnel${RST}"
-echo
-echo -e "   ${GRY}Local:${RST}    ${WHT}${BOLD}localhost:$port${RST}"
-echo -e "   ${GRY}Server:${RST}   ${WHT}$SERVER${RST}"
-echo -e "   ${GRY}Security:${RST} ${GRN}🔒 SSH Key Auth${RST}"
-echo
+echo -e "${CYN}Starting persistent tunnel...${RST}"
 
-dots "Connecting"
+(
+while true; do
+    ssh -i "$KEY_FILE" \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o ConnectTimeout=10 \
+    -N \
+    -R 0:localhost:$port \
+    $USER@$SERVER \
+    -p $SSH_PORT >>"$log_file" 2>&1
 
-ssh -i "$KEY_FILE" \
--o StrictHostKeyChecking=no \
--o UserKnownHostsFile=/dev/null \
--o ExitOnForwardFailure=yes \
--o ServerAliveInterval=100w \
--o ServerAliveCountMax=30 \
--o ConnectTimeout=10 \
--N -f \
--R 0:localhost:$port \
-$USER@$SERVER \
--p $SSH_PORT \
->"$log_file" 2>&1
+    echo "$(date) - Disconnected. Reconnecting in 5 seconds..." >>"$log_file"
+    sleep 5
+done
+) &
+
+local loop_pid=$!
+echo "$loop_pid" > "$pid_file"
 
 sleep 3
 
-if grep -q "Allocated port" "$log_file" 2>/dev/null;then
-local remote_port=$(grep "Allocated port" "$log_file"|grep -oE '[0-9]{4,5}'|head -1)
-echo "$remote_port">"$map_file"
-local ssh_pid=$(pgrep -f "ssh.*-R.*$port.*$SERVER"|head -1)
-[ -n "$ssh_pid" ]&&echo "$ssh_pid">"$pid_file"
+# Try detecting allocated remote port
+local remote_port=$(grep "Allocated port" "$log_file" | grep -oE '[0-9]{4,5}' | head -1)
+[ -n "$remote_port" ] && echo "$remote_port" > "$map_file"
 
 echo
-box "✓  TUNNEL ACTIVE  ✓" "$GRN"
-echo
-echo -e "   ${BOLD}═══ Connection Details ═══${RST}"
-echo
-echo -e "   ${GRY}├─${RST} Local:  ${WHT}localhost:$port${RST}"
-echo -e "   ${GRY}├─${RST} Remote: ${GRN}${BOLD}$remote_port${RST}"
-echo -e "   ${GRY}├─${RST} PID:    ${GRY}$ssh_pid${RST}"
-echo -e "   ${GRY}└─${RST} Status: ${GRN}${BLINK}●${RST} ${GRN}ONLINE${RST}"
-echo
-echo -e "   ${CYN}${BOLD}🔥 Share This URL:${RST}"
-echo
-echo -e "      ${GRN}${BOLD}${UNDER}http://$SERVER:$remote_port${RST}"
-echo
-echo -e "   ${GRY}${DIM}💡 Tip: Run 'tunnel list' to see all tunnels${RST}"
-echo
-else
-echo -e "   ${RED}✗${RST} Connection failed"
-echo -e "   ${YEL}Log:${RST} $log_file"
-return 1
+echo -e "${GRN}✓ Tunnel Running 24/7${RST}"
+echo -e "${GRY}Local:${RST} localhost:$port"
+
+if [ -n "$remote_port" ]; then
+echo -e "${GRY}Public:${RST} http://$SERVER:$remote_port"
 fi
+
+echo
 }
 
 stop_tunnel(){
@@ -161,91 +124,42 @@ local port="$1"
 local pid_file="$PID_DIR/tunnel-$port.pid"
 local map_file="$CONFIG_DIR/.port-$port"
 
-if [ ! -f "$pid_file" ];then
-echo -e "   ${YEL}⚠${RST} No tunnel for port $port"
-return 1
+if [ ! -f "$pid_file" ]; then
+echo -e "${YEL}No tunnel for port $port${RST}"
+exit 1
 fi
 
 local pid=$(cat "$pid_file")
-dots "Stopping tunnel"
+kill "$pid" 2>/dev/null
+rm -f "$pid_file" "$map_file"
 
-if kill "$pid" 2>/dev/null;then
-rm -f "$pid_file" "$map_file"
-echo -e "   ${GRN}✓${RST} Tunnel stopped for port ${BOLD}$port${RST}"
-else
-rm -f "$pid_file" "$map_file"
-echo -e "   ${YEL}⚠${RST} Process not found"
-fi
+echo -e "${GRN}Tunnel stopped for port $port${RST}"
 }
 
 list_tunnels(){
 banner
-echo -e "   ${BOLD}${UNDER}Active Tunnels${RST}"
+echo "Active Tunnels:"
 echo
 
-local count=0
-for pid_file in "$PID_DIR"/tunnel-*.pid;do
-[ -f "$pid_file" ]||continue
-local pid=$(cat "$pid_file" 2>/dev/null)
-local port=$(basename "$pid_file" .pid|sed 's/tunnel-//')
+for pid_file in "$PID_DIR"/tunnel-*.pid; do
+[ -f "$pid_file" ] || continue
+local pid=$(cat "$pid_file")
+local port=$(basename "$pid_file" .pid | sed 's/tunnel-//')
 
-if kill -0 "$pid" 2>/dev/null;then
-local remote=$(cat "$CONFIG_DIR/.port-$port" 2>/dev/null||echo "?")
-count=$((count+1))
-echo -e "   ${CYN}${BOLD}[$count]${RST} ${GRN}●${RST} ${BOLD}Port $port${RST}"
-echo -e "       ${GRY}├─${RST} Local:    ${WHT}localhost:$port${RST}"
-echo -e "       ${GRY}└─${RST} Remote:   ${GRN}${BOLD}http://$SERVER:$remote${RST}"
-echo
+if kill -0 "$pid" 2>/dev/null; then
+local remote=$(cat "$CONFIG_DIR/.port-$port" 2>/dev/null)
+echo "Port $port → http://$SERVER:$remote"
 else
 rm -f "$pid_file"
 fi
 done
 
-if [ $count -eq 0 ];then
-echo -e "   ${GRY}${DIM}No active tunnels${RST}"
-echo
-echo -e "   ${CYN}ℹ${RST} Start one with: ${BOLD}tunnel <port>${RST}"
-fi
 echo
 }
-
-stop_all(){
-banner
-echo -e "   ${YEL}🛑${RST} ${BOLD}Stopping all tunnels...${RST}"
-echo
-
-for pid_file in "$PID_DIR"/tunnel-*.pid;do
-[ -f "$pid_file" ]||continue
-local port=$(basename "$pid_file" .pid|sed 's/tunnel-//')
-local pid=$(cat "$pid_file")
-kill "$pid" 2>/dev/null
-rm -f "$pid_file" "$CONFIG_DIR/.port-$port"
-echo -e "   ${GRN}✓${RST} Stopped port $port"
-done
-
-echo
-}
-
-show_help(){
-banner
-echo "   Usage:"
-echo
-echo "   tunnel <port>"
-echo "   tunnel stop <port>"
-echo "   tunnel list"
-echo "   tunnel stop-all"
-echo
-}
-
-if ! command -v ssh &>/dev/null;then
-echo -e "${RED}✗${RST} ssh not installed"
-exit 1
-fi
 
 case "${1:-help}" in
 [0-9]*) start_tunnel "$1" ;;
 stop) stop_tunnel "$2" ;;
-list|ls) list_tunnels ;;
-stop-all) stop_all ;;
-*) show_help ;;
+list) list_tunnels ;;
+*) echo "Usage: tunnel <port> | tunnel stop <port> | tunnel list" ;;
 esac
