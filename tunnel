@@ -38,7 +38,7 @@ EOF
 
 systemctl daemon-reload
 
-# Create tunnel command
+# Create tunnel command with ASCII art
 cat > /usr/local/bin/tunnel <<EOF
 #!/bin/bash
 
@@ -48,7 +48,19 @@ SERVICE="${SERVICE}"
 GREEN="\\e[32m"
 RED="\\e[31m"
 YELLOW="\\e[33m"
+CYAN="\\e[36m"
 RESET="\\e[0m"
+
+banner(){
+echo -e "\${CYAN}"
+echo "██╗  ██╗███████╗██╗     ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗"
+echo "██║ ██╔╝██╔════╝██║     ██╔══██╗████╗  ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝"
+echo "█████╔╝ █████╗  ██║     ██████╔╝██╔██╗ ██║██║   ██║██║  ██║█████╗  ███████╗"
+echo "██╔═██╗ ██╔══╝  ██║     ██╔═══╝ ██║╚██╗██║██║   ██║██║  ██║██╔══╝  ╚════██║"
+echo "██║  ██╗███████╗███████╗██║     ██║ ╚████║╚██████╔╝██████╔╝███████╗███████║"
+echo "╚═╝  ╚═╝╚══════╝╚══════╝╚═╝     ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝"
+echo -e "\${RESET}"
+}
 
 validate_port(){
 if [[ ! "\$1" =~ ^[0-9]+$ ]] || [ "\$1" -lt 1 ] || [ "\$1" -gt 65535 ]; then
@@ -60,6 +72,7 @@ fi
 case "\$1" in
 
 create)
+    banner
     validate_port "\$2"
 
     systemctl enable \${SERVICE}@\${2} >/dev/null
@@ -104,10 +117,13 @@ logs)
     ;;
 
 list)
+    banner
     systemctl list-units --type=service | grep \${SERVICE}@ || echo "No active tunnels."
     ;;
 
 *)
+    banner
+    echo
     echo "Usage:"
     echo "  tunnel create <port>"
     echo "  tunnel stop <port>"
@@ -126,6 +142,6 @@ echo "Tunnel System Installed Successfully"
 echo "Server: ${SERVER}"
 echo "========================================="
 echo
-echo "Example:"
+echo "Run:"
 echo "  tunnel create 3000"
 echo
