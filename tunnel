@@ -1,165 +1,141 @@
 #!/bin/bash
-# ══════════════════════════════════════════════════════════════════
-#  KelpNodes Tunnel v2.1 - Persistent 24/7 Port Forwarding
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
+#  KelpNodes Tunnel - Full 24/7 Systemd Installer
+# ════════════════════════════════════════════════════════════════
+
+set -e
 
 SERVER="57.128.42.40"
-USER="tunnel"
-SSH_PORT=22
+SERVICE_NAME="kelpnodes"
 
-CONFIG_DIR="$HOME/.kelpnodes-tunnel"
-KEY_FILE="$CONFIG_DIR/.key"
-LOG_DIR="$CONFIG_DIR/logs"
-PID_DIR="$CONFIG_DIR/pids"
+echo "Installing KelpNodes Tunnel System..."
 
-mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$PID_DIR" 2>/dev/null
-chmod 700 "$CONFIG_DIR" 2>/dev/null
-
-# Colors
-RED="\e[31m"; GRN="\e[32m"; YEL="\e[33m"; CYN="\e[36m"; WHT="\e[97m"
-GRY="\e[90m"; BOLD="\e[1m"; DIM="\e[2m"; UNDER="\e[4m"; BLINK="\e[5m"; RST="\e[0m"
-
-# ══════════════════════════════════════════════════════════════════
-#  EMBEDDED RESTRICTED SSH KEY
-# ══════════════════════════════════════════════════════════════════
-setup_key(){
-if [ ! -f "$KEY_FILE" ]; then
-cat >"$KEY_FILE"<<'KEY'
------BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBJEK7mHycRjc8BFmcqL7PjJFgcDaRhFaDPinB8fjS54wAAAJhiOSxDYjks
-QwAAAAtzc2gtZWQyNTUxOQAAACBJEK7mHycRjc8BFmcqL7PjJFgcDaRhFaDPinB8fjS54w
-AAAEAy5wkmy3eoL+/RPuv+kv0s473dRWyOCFmvTBUCLPn89EkQruYfJxGNzwEWZyovs+Mk
-WBwNpGEVoM+KcHx+NLnjAAAAFXR1bm5lbC1yZXN0cmljdGVkLWtleQ==
------END OPENSSH PRIVATE KEY-----
-KEY
-chmod 600 "$KEY_FILE"
+# Install autossh if missing
+if ! command -v autossh >/dev/null 2>&1; then
+    echo "Installing autossh..."
+    apt update && apt install -y autossh
 fi
-}
 
-# ══════════════════════════════════════════════════════════════════
-#  DISPLAY
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
+# Create systemd template
+# ════════════════════════════════════════════════════════════════
+
+cat > /etc/systemd/system/${SERVICE_NAME}@.service <<EOF
+[Unit]
+Description=KelpNodes Tunnel %i
+After=network.target
+
+[Service]
+User=root
+ExecStart=/usr/bin/autossh -M 0 -N \\
+ -o ServerAliveInterval=30 \\
+ -o ServerAliveCountMax=3 \\
+ -o ExitOnForwardFailure=yes \\
+ -R 0.0.0.0:0:localhost:%i \\
+ tunnel@${SERVER}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+
+# ════════════════════════════════════════════════════════════════
+# Create CLI manager
+# ════════════════════════════════════════════════════════════════
+
+cat > /usr/local/bin/tunnel <<'EOF'
+#!/bin/bash
+
+SERVICE="kelpnodes"
+
+GREEN="\e[32m"
+RED="\e[31m"
+YELLOW="\e[33m"
+CYAN="\e[36m"
+RESET="\e[0m"
+
 banner(){
-clear
-echo -e "${GRN}${BOLD}"
-echo "   ╔════════════════════════════════════════════════════╗"
-echo "   ║        ⚡  KelpNodes Tunnel v2.1  ⚡              ║"
-echo "   ╚════════════════════════════════════════════════════╝"
-echo -e "${RST}"
-echo -e "${GRY}${DIM}   Server: $SERVER  •  24/7 Persistent Mode${RST}"
-echo
+echo -e "${CYAN}"
+echo "██╗  ██╗███████╗██╗     ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗"
+echo "██║ ██╔╝██╔════╝██║     ██╔══██╗████╗  ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝"
+echo "█████╔╝ █████╗  ██║     ██████╔╝██╔██╗ ██║██║   ██║██║  ██║█████╗  ███████╗"
+echo "██╔═██╗ ██╔══╝  ██║     ██╔═══╝ ██║╚██╗██║██║   ██║██║  ██║██╔══╝  ╚════██║"
+echo "██║  ██╗███████╗███████╗██║     ██║ ╚████║╚██████╔╝██████╔╝███████╗███████║"
+echo "╚═╝  ╚═╝╚══════╝╚══════╝╚═╝     ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝"
+echo -e "${RESET}"
 }
 
-# ══════════════════════════════════════════════════════════════════
-#  PERSISTENT TUNNEL
-# ══════════════════════════════════════════════════════════════════
-start_tunnel(){
-
-local port="$1"
-local pid_file="$PID_DIR/tunnel-$port.pid"
-local map_file="$CONFIG_DIR/.port-$port"
-local log_file="$LOG_DIR/tunnel-$port.log"
-
-banner
-
-if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-echo -e "${RED}Invalid port (1-65535)${RST}"
-exit 1
+validate_port(){
+if [[ ! "$1" =~ ^[0-9]+$ ]] || [ "$1" -lt 1 ] || [ "$1" -gt 65535 ]; then
+    echo -e "${RED}Invalid port (1-65535)${RESET}"
+    exit 1
 fi
-
-if [ -f "$pid_file" ]; then
-local pid=$(cat "$pid_file")
-if kill -0 "$pid" 2>/dev/null; then
-echo -e "${YEL}Tunnel already running for port $port${RST}"
-exit 0
-fi
-fi
-
-setup_key
-
-echo -e "${CYN}Starting persistent tunnel...${RST}"
-
-(
-while true; do
-    ssh -i "$KEY_FILE" \
-    -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o ExitOnForwardFailure=yes \
-    -o ServerAliveInterval=30 \
-    -o ServerAliveCountMax=3 \
-    -o ConnectTimeout=10 \
-    -N \
-    -R 0:localhost:$port \
-    $USER@$SERVER \
-    -p $SSH_PORT >>"$log_file" 2>&1
-
-    echo "$(date) - Disconnected. Reconnecting in 5 seconds..." >>"$log_file"
-    sleep 5
-done
-) &
-
-local loop_pid=$!
-echo "$loop_pid" > "$pid_file"
-
-sleep 3
-
-# Try detecting allocated remote port
-local remote_port=$(grep "Allocated port" "$log_file" | grep -oE '[0-9]{4,5}' | head -1)
-[ -n "$remote_port" ] && echo "$remote_port" > "$map_file"
-
-echo
-echo -e "${GRN}✓ Tunnel Running 24/7${RST}"
-echo -e "${GRY}Local:${RST} localhost:$port"
-
-if [ -n "$remote_port" ]; then
-echo -e "${GRY}Public:${RST} http://$SERVER:$remote_port"
-fi
-
-echo
 }
 
-stop_tunnel(){
-local port="$1"
-local pid_file="$PID_DIR/tunnel-$port.pid"
-local map_file="$CONFIG_DIR/.port-$port"
+case "$1" in
 
-if [ ! -f "$pid_file" ]; then
-echo -e "${YEL}No tunnel for port $port${RST}"
-exit 1
-fi
+create)
+    validate_port "$2"
+    systemctl enable ${SERVICE}@${2}
+    systemctl start ${SERVICE}@${2}
+    echo -e "${GREEN}Tunnel created on port $2${RESET}"
+    ;;
 
-local pid=$(cat "$pid_file")
-kill "$pid" 2>/dev/null
-rm -f "$pid_file" "$map_file"
+stop)
+    validate_port "$2"
+    systemctl stop ${SERVICE}@${2}
+    systemctl disable ${SERVICE}@${2}
+    echo -e "${YELLOW}Tunnel stopped on port $2${RESET}"
+    ;;
 
-echo -e "${GRN}Tunnel stopped for port $port${RST}"
-}
+restart)
+    validate_port "$2"
+    systemctl restart ${SERVICE}@${2}
+    echo -e "${CYAN}Tunnel restarted on port $2${RESET}"
+    ;;
 
-list_tunnels(){
-banner
-echo "Active Tunnels:"
-echo
+status)
+    validate_port "$2"
+    systemctl status ${SERVICE}@${2}
+    ;;
 
-for pid_file in "$PID_DIR"/tunnel-*.pid; do
-[ -f "$pid_file" ] || continue
-local pid=$(cat "$pid_file")
-local port=$(basename "$pid_file" .pid | sed 's/tunnel-//')
+list)
+    banner
+    systemctl list-units --type=service | grep ${SERVICE}@ || echo "No active tunnels."
+    ;;
 
-if kill -0 "$pid" 2>/dev/null; then
-local remote=$(cat "$CONFIG_DIR/.port-$port" 2>/dev/null)
-echo "Port $port → http://$SERVER:$remote"
-else
-rm -f "$pid_file"
-fi
-done
+logs)
+    validate_port "$2"
+    journalctl -u ${SERVICE}@${2} -f
+    ;;
 
-echo
-}
-
-case "${1:-help}" in
-[0-9]*) start_tunnel "$1" ;;
-stop) stop_tunnel "$2" ;;
-list) list_tunnels ;;
-*) echo "Usage: tunnel <port> | tunnel stop <port> | tunnel list" ;;
+*)
+    banner
+    echo
+    echo "Usage:"
+    echo "  tunnel create <port>"
+    echo "  tunnel stop <port>"
+    echo "  tunnel restart <port>"
+    echo "  tunnel status <port>"
+    echo "  tunnel list"
+    echo "  tunnel logs <port>"
+    ;;
 esac
+EOF
+
+chmod +x /usr/local/bin/tunnel
+
+echo
+echo "══════════════════════════════════════"
+echo " KelpNodes Tunnel Installed Successfully"
+echo " Server: ${SERVER}"
+echo "══════════════════════════════════════"
+echo
+echo "Commands:"
+echo "  tunnel create 3000"
+echo "  tunnel list"
+echo "  tunnel stop 3000"
+echo
