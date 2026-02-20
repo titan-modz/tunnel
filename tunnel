@@ -1,26 +1,19 @@
 #!/bin/bash
-# ════════════════════════════════════════════════════════════════
-#  KelpNodes Tunnel - Full 24/7 Systemd Installer
-# ════════════════════════════════════════════════════════════════
 
 set -e
 
 SERVER="57.128.42.40"
-SERVICE_NAME="kelpnodes"
+SERVICE="kelpnodes"
 
-echo "Installing KelpNodes Tunnel System..."
+echo "Installing Tunnel System..."
 
 # Install autossh if missing
 if ! command -v autossh >/dev/null 2>&1; then
-    echo "Installing autossh..."
     apt update && apt install -y autossh
 fi
 
-# ════════════════════════════════════════════════════════════════
 # Create systemd template
-# ════════════════════════════════════════════════════════════════
-
-cat > /etc/systemd/system/${SERVICE_NAME}@.service <<EOF
+cat > /etc/systemd/system/${SERVICE}@.service <<EOF
 [Unit]
 Description=KelpNodes Tunnel %i
 After=network.target
@@ -31,10 +24,13 @@ ExecStart=/usr/bin/autossh -M 0 -N \\
  -o ServerAliveInterval=30 \\
  -o ServerAliveCountMax=3 \\
  -o ExitOnForwardFailure=yes \\
+ -o LogLevel=VERBOSE \\
  -R 0.0.0.0:0:localhost:%i \\
  tunnel@${SERVER}
 Restart=always
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -42,86 +38,82 @@ EOF
 
 systemctl daemon-reload
 
-# ════════════════════════════════════════════════════════════════
-# Create CLI manager
-# ════════════════════════════════════════════════════════════════
-
-cat > /usr/local/bin/tunnel <<'EOF'
+# Create tunnel command
+cat > /usr/local/bin/tunnel <<EOF
 #!/bin/bash
 
-SERVICE="kelpnodes"
+SERVER="${SERVER}"
+SERVICE="${SERVICE}"
 
-GREEN="\e[32m"
-RED="\e[31m"
-YELLOW="\e[33m"
-CYAN="\e[36m"
-RESET="\e[0m"
-
-banner(){
-echo -e "${CYAN}"
-echo "██╗  ██╗███████╗██╗     ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗"
-echo "██║ ██╔╝██╔════╝██║     ██╔══██╗████╗  ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝"
-echo "█████╔╝ █████╗  ██║     ██████╔╝██╔██╗ ██║██║   ██║██║  ██║█████╗  ███████╗"
-echo "██╔═██╗ ██╔══╝  ██║     ██╔═══╝ ██║╚██╗██║██║   ██║██║  ██║██╔══╝  ╚════██║"
-echo "██║  ██╗███████╗███████╗██║     ██║ ╚████║╚██████╔╝██████╔╝███████╗███████║"
-echo "╚═╝  ╚═╝╚══════╝╚══════╝╚═╝     ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝"
-echo -e "${RESET}"
-}
+GREEN="\\e[32m"
+RED="\\e[31m"
+YELLOW="\\e[33m"
+RESET="\\e[0m"
 
 validate_port(){
-if [[ ! "$1" =~ ^[0-9]+$ ]] || [ "$1" -lt 1 ] || [ "$1" -gt 65535 ]; then
-    echo -e "${RED}Invalid port (1-65535)${RESET}"
+if [[ ! "\$1" =~ ^[0-9]+$ ]] || [ "\$1" -lt 1 ] || [ "\$1" -gt 65535 ]; then
+    echo -e "\${RED}Invalid port (1-65535)\${RESET}"
     exit 1
 fi
 }
 
-case "$1" in
+case "\$1" in
 
 create)
-    validate_port "$2"
-    systemctl enable ${SERVICE}@${2}
-    systemctl start ${SERVICE}@${2}
-    echo -e "${GREEN}Tunnel created on port $2${RESET}"
+    validate_port "\$2"
+
+    systemctl enable \${SERVICE}@\${2} >/dev/null
+    systemctl start \${SERVICE}@\${2}
+
+    echo -e "\${YELLOW}Waiting for tunnel allocation...\${RESET}"
+    sleep 3
+
+    PORT=\$(journalctl -u \${SERVICE}@\${2} --no-pager -n 50 \\
+        | grep "Allocated port" \\
+        | tail -n1 \\
+        | grep -oP 'Allocated port \\K[0-9]+')
+
+    if [ -z "\$PORT" ]; then
+        echo -e "\${RED}Failed to detect allocated port.\${RESET}"
+        exit 1
+    fi
+
+    echo
+    echo -e "\${GREEN}═══════════════════════════════\${RESET}"
+    echo -e "\${GREEN}Tunnel Created Successfully\${RESET}"
+    echo -e "\${GREEN}Public: \${SERVER}:\${PORT}\${RESET}"
+    echo -e "\${GREEN}Local : localhost:\${2}\${RESET}"
+    echo -e "\${GREEN}═══════════════════════════════\${RESET}"
     ;;
 
 stop)
-    validate_port "$2"
-    systemctl stop ${SERVICE}@${2}
-    systemctl disable ${SERVICE}@${2}
-    echo -e "${YELLOW}Tunnel stopped on port $2${RESET}"
-    ;;
-
-restart)
-    validate_port "$2"
-    systemctl restart ${SERVICE}@${2}
-    echo -e "${CYAN}Tunnel restarted on port $2${RESET}"
+    validate_port "\$2"
+    systemctl stop \${SERVICE}@\${2}
+    systemctl disable \${SERVICE}@\${2}
+    echo -e "\${YELLOW}Tunnel stopped on port \$2\${RESET}"
     ;;
 
 status)
-    validate_port "$2"
-    systemctl status ${SERVICE}@${2}
-    ;;
-
-list)
-    banner
-    systemctl list-units --type=service | grep ${SERVICE}@ || echo "No active tunnels."
+    validate_port "\$2"
+    systemctl status \${SERVICE}@\${2}
     ;;
 
 logs)
-    validate_port "$2"
-    journalctl -u ${SERVICE}@${2} -f
+    validate_port "\$2"
+    journalctl -u \${SERVICE}@\${2} -f
+    ;;
+
+list)
+    systemctl list-units --type=service | grep \${SERVICE}@ || echo "No active tunnels."
     ;;
 
 *)
-    banner
-    echo
     echo "Usage:"
     echo "  tunnel create <port>"
     echo "  tunnel stop <port>"
-    echo "  tunnel restart <port>"
     echo "  tunnel status <port>"
-    echo "  tunnel list"
     echo "  tunnel logs <port>"
+    echo "  tunnel list"
     ;;
 esac
 EOF
@@ -129,13 +121,11 @@ EOF
 chmod +x /usr/local/bin/tunnel
 
 echo
-echo "══════════════════════════════════════"
-echo " KelpNodes Tunnel Installed Successfully"
-echo " Server: ${SERVER}"
-echo "══════════════════════════════════════"
+echo "========================================="
+echo "Tunnel System Installed Successfully"
+echo "Server: ${SERVER}"
+echo "========================================="
 echo
-echo "Commands:"
+echo "Example:"
 echo "  tunnel create 3000"
-echo "  tunnel list"
-echo "  tunnel stop 3000"
 echo
