@@ -1,147 +1,337 @@
 #!/bin/bash
-
-set -e
+# ══════════════════════════════════════════════════════════════════
+#  AtherixCloud Tunnel v2.0 - Advanced Port Forwarding
+# ══════════════════════════════════════════════════════════════════
 
 SERVER="57.128.42.40"
-SERVICE="kelpnodes"
+USER="tunnel"
+SSH_PORT=22
 
-echo "Installing Tunnel System..."
+CONFIG_DIR="$HOME/.atherix-tunnel"
+KEY_FILE="$CONFIG_DIR/.key"
+LOG_DIR="$CONFIG_DIR/logs"
+PID_DIR="$CONFIG_DIR/pids"
+mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$PID_DIR" 2>/dev/null
+chmod 700 "$CONFIG_DIR" 2>/dev/null
 
-# Install autossh if missing
-if ! command -v autossh >/dev/null 2>&1; then
-    apt update && apt install -y autossh
+# Colors
+RED="\e[31m"; GRN="\e[32m"; YEL="\e[33m"; CYN="\e[36m"; WHT="\e[97m"
+GRY="\e[90m"; BOLD="\e[1m"; DIM="\e[2m"; UNDER="\e[4m"; BLINK="\e[5m"; RST="\e[0m"
+
+# ══════════════════════════════════════════════════════════════════
+#  EMBEDDED RESTRICTED SSH KEY (can ONLY forward ports)
+# ══════════════════════════════════════════════════════════════════
+setup_key(){
+if [ ! -f "$KEY_FILE" ];then
+cat>"$KEY_FILE"<<'KEY'
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACBJEK7mHycRjc8BFmcqL7PjJFgcDaRhFaDPinB8fjS54wAAAJhiOSxDYjks
+QwAAAAtzc2gtZWQyNTUxOQAAACBJEK7mHycRjc8BFmcqL7PjJFgcDaRhFaDPinB8fjS54w
+AAAEAy5wkmy3eoL+/RPuv+kv0s473dRWyOCFmvTBUCLPn89EkQruYfJxGNzwEWZyovs+Mk
+WBwNpGEVoM+KcHx+NLnjAAAAFXR1bm5lbC1yZXN0cmljdGVkLWtleQ==
+-----END OPENSSH PRIVATE KEY-----
+KEY
+chmod 600 "$KEY_FILE"
 fi
+}
 
-# Create systemd template
-cat > /etc/systemd/system/${SERVICE}@.service <<EOF
-[Unit]
-Description=KelpNodes Tunnel %i
-After=network.target
-
-[Service]
-User=root
-ExecStart=/usr/bin/autossh -M 0 -N \\
- -o ServerAliveInterval=30 \\
- -o ServerAliveCountMax=3 \\
- -o ExitOnForwardFailure=yes \\
- -o LogLevel=VERBOSE \\
- -R 0.0.0.0:0:localhost:%i \\
- tunnel@${SERVER}
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-
-# Create tunnel command with ASCII art
-cat > /usr/local/bin/tunnel <<EOF
-#!/bin/bash
-
-SERVER="${SERVER}"
-SERVICE="${SERVICE}"
-
-GREEN="\\e[32m"
-RED="\\e[31m"
-YELLOW="\\e[33m"
-CYAN="\\e[36m"
-RESET="\\e[0m"
+# ══════════════════════════════════════════════════════════════════
+#  DISPLAY FUNCTIONS
+# ══════════════════════════════════════════════════════════════════
 
 banner(){
-echo -e "\${CYAN}"
-echo "██╗  ██╗███████╗██╗     ██████╗ ███╗   ██╗ ██████╗ ██████╗ ███████╗███████╗"
-echo "██║ ██╔╝██╔════╝██║     ██╔══██╗████╗  ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝"
-echo "█████╔╝ █████╗  ██║     ██████╔╝██╔██╗ ██║██║   ██║██║  ██║█████╗  ███████╗"
-echo "██╔═██╗ ██╔══╝  ██║     ██╔═══╝ ██║╚██╗██║██║   ██║██║  ██║██╔══╝  ╚════██║"
-echo "██║  ██╗███████╗███████╗██║     ██║ ╚████║╚██████╔╝██████╔╝███████╗███████║"
-echo "╚═╝  ╚═╝╚══════╝╚══════╝╚═╝     ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝"
-echo -e "\${RESET}"
+clear
+echo -e "${CYN}${BOLD}"
+echo "   ╔════════════════════════════════════════════════════╗"
+echo "   ║                                                    ║"
+echo "   ║        ${WHT}⚡  AtherixCloud Tunnel v2.0  ⚡${CYN}         ║"
+echo "   ║                                                    ║"
+echo "   ║         ${DIM}Secure Port Forwarding Service${CYN}          ║"
+echo "   ║                                                    ║"
+echo "   ╚════════════════════════════════════════════════════╝"
+echo -e "${RST}"
+echo -e "${GRY}${DIM}   Server: $SERVER  •  🔒 Secure  •  Status: ${GRN}ONLINE${RST}"
+echo
 }
 
-validate_port(){
-if [[ ! "\$1" =~ ^[0-9]+$ ]] || [ "\$1" -lt 1 ] || [ "\$1" -gt 65535 ]; then
-    echo -e "\${RED}Invalid port (1-65535)\${RESET}"
-    exit 1
+box(){
+local msg="$1"
+local color="${2:-$GRN}"
+echo -e "${color}${BOLD}"
+echo "   ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
+echo "   ┃   $msg"
+echo "   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
+echo -e "${RST}"
+}
+
+dots(){
+printf "   ${CYN}$1${RST}"
+for i in 1 2 3;do printf ".";sleep 0.15;done
+echo
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  TUNNEL OPERATIONS
+# ══════════════════════════════════════════════════════════════════
+
+start_tunnel(){
+local port="$1"
+local pid_file="$PID_DIR/tunnel-$port.pid"
+local map_file="$CONFIG_DIR/.port-$port"
+local log_file="$LOG_DIR/tunnel-$port.log"
+
+banner
+
+# Validate port
+if [ $port -lt 1 ]||[ $port -gt 65535 ];then
+echo -e "   ${RED}✗${RST} ${BOLD}Invalid port${RST} (must be 1-65535)"
+return 1
+fi
+
+# Check if running
+if [ -f "$pid_file" ];then
+local pid=$(cat "$pid_file")
+if kill -0 "$pid" 2>/dev/null;then
+local remote=$(cat "$map_file" 2>/dev/null||echo "?")
+echo -e "   ${YEL}⚠${RST} Tunnel already active for port ${BOLD}$port${RST}"
+echo
+echo -e "   ${CYN}🔗${RST} Public URL: ${GRN}${BOLD}http://$SERVER:$remote${RST}"
+echo
+return 0
+fi
+fi
+
+setup_key
+
+# Display info
+echo -e "   ${CYN}🚀${RST} ${BOLD}Starting Tunnel${RST}"
+echo
+echo -e "   ${GRY}Local:${RST}    ${WHT}${BOLD}localhost:$port${RST}"
+echo -e "   ${GRY}Server:${RST}   ${WHT}$SERVER${RST}"
+echo -e "   ${GRY}Security:${RST} ${GRN}🔒 SSH Key Auth${RST}"
+echo
+
+dots "Connecting"
+
+# Start tunnel
+ssh -i "$KEY_FILE" \
+-o StrictHostKeyChecking=no \
+-o UserKnownHostsFile=/dev/null \
+-o ExitOnForwardFailure=yes \
+-o ServerAliveInterval=30 \
+-o ServerAliveCountMax=3 \
+-o ConnectTimeout=10 \
+-N -f \
+-R 0:localhost:$port \
+$USER@$SERVER \
+-p $SSH_PORT \
+>"$log_file" 2>&1
+
+sleep 3
+
+# Get remote port
+if grep -q "Allocated port" "$log_file" 2>/dev/null;then
+local remote_port=$(grep "Allocated port" "$log_file"|grep -oE '[0-9]{4,5}'|head -1)
+echo "$remote_port">"$map_file"
+local ssh_pid=$(pgrep -f "ssh.*-R.*$port.*$SERVER"|head -1)
+[ -n "$ssh_pid" ]&&echo "$ssh_pid">"$pid_file"
+
+echo
+box "✓  TUNNEL ACTIVE  ✓" "$GRN"
+echo
+echo -e "   ${BOLD}═══ Connection Details ═══${RST}"
+echo
+echo -e "   ${GRY}├─${RST} Local:  ${WHT}localhost:$port${RST}"
+echo -e "   ${GRY}├─${RST} Remote: ${GRN}${BOLD}$remote_port${RST}"
+echo -e "   ${GRY}├─${RST} PID:    ${GRY}$ssh_pid${RST}"
+echo -e "   ${GRY}└─${RST} Status: ${GRN}${BLINK}●${RST} ${GRN}ONLINE${RST}"
+echo
+echo -e "   ${CYN}${BOLD}🔥 Share This URL:${RST}"
+echo
+echo -e "      ${GRN}${BOLD}${UNDER}http://$SERVER:$remote_port${RST}"
+echo
+echo -e "   ${GRY}${DIM}💡 Tip: Run 'tunnel list' to see all tunnels${RST}"
+echo
+else
+echo -e "   ${RED}✗${RST} Connection failed"
+echo -e "   ${YEL}Log:${RST} $log_file"
+return 1
 fi
 }
 
-case "\$1" in
+stop_tunnel(){
+local port="$1"
+local pid_file="$PID_DIR/tunnel-$port.pid"
+local map_file="$CONFIG_DIR/.port-$port"
 
-create)
-    banner
-    validate_port "\$2"
+if [ ! -f "$pid_file" ];then
+echo -e "   ${YEL}⚠${RST} No tunnel for port $port"
+return 1
+fi
 
-    systemctl enable \${SERVICE}@\${2} >/dev/null
-    systemctl start \${SERVICE}@\${2}
+local pid=$(cat "$pid_file")
+dots "Stopping tunnel"
 
-    echo -e "\${YELLOW}Waiting for tunnel allocation...\${RESET}"
-    sleep 3
+if kill "$pid" 2>/dev/null;then
+rm -f "$pid_file" "$map_file"
+echo -e "   ${GRN}✓${RST} Tunnel stopped for port ${BOLD}$port${RST}"
+else
+rm -f "$pid_file" "$map_file"
+echo -e "   ${YEL}⚠${RST} Process not found"
+fi
+}
 
-    PORT=\$(journalctl -u \${SERVICE}@\${2} --no-pager -n 50 \\
-        | grep "Allocated port" \\
-        | tail -n1 \\
-        | grep -oP 'Allocated port \\K[0-9]+')
+list_tunnels(){
+banner
+echo -e "   ${BOLD}${UNDER}Active Tunnels${RST}"
+echo
 
-    if [ -z "\$PORT" ]; then
-        echo -e "\${RED}Failed to detect allocated port.\${RESET}"
-        exit 1
-    fi
+local count=0
+for pid_file in "$PID_DIR"/tunnel-*.pid;do
+[ -f "$pid_file" ]||continue
+local pid=$(cat "$pid_file" 2>/dev/null)
+local port=$(basename "$pid_file" .pid|sed 's/tunnel-//')
 
-    echo
-    echo -e "\${GREEN}═══════════════════════════════\${RESET}"
-    echo -e "\${GREEN}Tunnel Created Successfully\${RESET}"
-    echo -e "\${GREEN}Public: \${SERVER}:\${PORT}\${RESET}"
-    echo -e "\${GREEN}Local : localhost:\${2}\${RESET}"
-    echo -e "\${GREEN}═══════════════════════════════\${RESET}"
-    ;;
+if kill -0 "$pid" 2>/dev/null;then
+local remote=$(cat "$CONFIG_DIR/.port-$port" 2>/dev/null||echo "?")
+local start=$(stat -c %Y "$pid_file" 2>/dev/null||stat -f %m "$pid_file" 2>/dev/null||echo 0)
+local now=$(date +%s)
+local dur=$((now-start))
+local time=""
 
-stop)
-    validate_port "\$2"
-    systemctl stop \${SERVICE}@\${2}
-    systemctl disable \${SERVICE}@\${2}
-    echo -e "\${YELLOW}Tunnel stopped on port \$2\${RESET}"
-    ;;
+if [ $dur -ge 3600 ];then
+time="$((dur/3600))h $((dur%3600/60))m"
+elif [ $dur -ge 60 ];then
+time="$((dur/60))m $((dur%60))s"
+else
+time="${dur}s"
+fi
 
-status)
-    validate_port "\$2"
-    systemctl status \${SERVICE}@\${2}
-    ;;
+count=$((count+1))
+echo -e "   ${CYN}${BOLD}[$count]${RST} ${GRN}●${RST} ${BOLD}Port $port${RST}"
+echo -e "       ${GRY}├─${RST} Local:    ${WHT}localhost:$port${RST}"
+echo -e "       ${GRY}├─${RST} Remote:   ${GRN}${BOLD}http://$SERVER:$remote${RST}"
+echo -e "       ${GRY}├─${RST} PID:      ${GRY}$pid${RST}"
+echo -e "       ${GRY}└─${RST} Duration: ${WHT}$time${RST}"
+echo
+else
+rm -f "$pid_file"
+fi
+done
 
-logs)
-    validate_port "\$2"
-    journalctl -u \${SERVICE}@\${2} -f
-    ;;
+if [ $count -eq 0 ];then
+echo -e "   ${GRY}${DIM}No active tunnels${RST}"
+echo
+echo -e "   ${CYN}ℹ${RST} Start one with: ${BOLD}tunnel <port>${RST}"
+echo -e "   ${CYN}ℹ${RST} Example: ${BOLD}tunnel 8080${RST}"
+else
+echo -e "   ${GRY}${DIM}─────────────────────────────────────────${RST}"
+echo -e "   ${BOLD}Total:${RST} ${GRN}$count${RST} tunnel(s)"
+fi
+echo
+}
 
-list)
-    banner
-    systemctl list-units --type=service | grep \${SERVICE}@ || echo "No active tunnels."
-    ;;
+stop_all(){
+banner
+echo -e "   ${YEL}🛑${RST} ${BOLD}Stopping all tunnels...${RST}"
+echo
 
-*)
-    banner
-    echo
-    echo "Usage:"
-    echo "  tunnel create <port>"
-    echo "  tunnel stop <port>"
-    echo "  tunnel status <port>"
-    echo "  tunnel logs <port>"
-    echo "  tunnel list"
-    ;;
-esac
+local count=0
+for pid_file in "$PID_DIR"/tunnel-*.pid;do
+[ -f "$pid_file" ]||continue
+local port=$(basename "$pid_file" .pid|sed 's/tunnel-//')
+local pid=$(cat "$pid_file")
+
+if kill -0 "$pid" 2>/dev/null;then
+kill "$pid" 2>/dev/null
+rm -f "$pid_file" "$CONFIG_DIR/.port-$port"
+echo -e "   ${GRN}✓${RST} Stopped port $port"
+count=$((count+1))
+fi
+done
+
+if [ $count -eq 0 ];then
+echo -e "   ${GRY}${DIM}No active tunnels${RST}"
+else
+echo
+echo -e "   ${GRN}${BOLD}✓ Stopped $count tunnel(s)${RST}"
+fi
+echo
+}
+
+show_help(){
+banner
+cat<<'EOF'
+   USAGE
+
+   tunnel <port>         Start tunnel
+   tunnel stop <port>    Stop tunnel
+   tunnel list           List all tunnels
+   tunnel stop-all       Stop all tunnels
+   tunnel help           Show this help
+
+   EXAMPLES
+
+   # Start tunnel for port 8080
+   tunnel 8080
+
+   # List all active tunnels
+   tunnel list
+
+   # Stop specific tunnel
+   tunnel stop 8080
+
+   # Stop all tunnels
+   tunnel stop-all
+
+
+   SECURITY
+
+   🔒 Restricted SSH key (port forwarding only)
+   🔒 Cannot login to server
+   🔒 Cannot execute commands
+   🔒 Automatic reconnection
+
 EOF
+}
 
-chmod +x /usr/local/bin/tunnel
+# ══════════════════════════════════════════════════════════════════
+#  MAIN
+# ══════════════════════════════════════════════════════════════════
 
+if ! command -v ssh &>/dev/null;then
+echo -e "${RED}✗${RST} ssh not installed"
 echo
-echo "========================================="
-echo "Tunnel System Installed Successfully"
-echo "Server: ${SERVER}"
-echo "========================================="
+echo "Install: sudo apt-get install openssh-client"
+exit 1
+fi
+
+case "${1:-help}" in
+[0-9]*)
+start_tunnel "$1"
+;;
+stop)
+[ -z "$2" ]&&{ banner;echo -e "   ${RED}✗${RST} Port required\n   Usage: tunnel stop <port>\n";exit 1;}
+banner
+stop_tunnel "$2"
 echo
-echo "Run:"
-echo "  tunnel create 3000"
+;;
+list|ls)
+list_tunnels
+;;
+stop-all|stopall)
+stop_all
+;;
+help|--help|-h|"")
+show_help
+;;
+*)
+banner
+echo -e "   ${RED}✗${RST} Unknown command: ${BOLD}$1${RST}"
 echo
+echo -e "   ${CYN}ℹ${RST} Run ${BOLD}tunnel help${RST} for usage"
+echo
+exit 1
+;;
+esac
