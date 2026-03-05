@@ -1,0 +1,152 @@
+#!/bin/bash
+
+HOST="tcp-proxy@178.239.114.245"
+PASSWORD="0"
+
+PORT_START=45001
+PORT_END=46000
+
+STORE="$HOME/.hyzex_forwards"
+mkdir -p "$STORE"
+
+create_tunnel() {
+
+read -p "Enter LOCAL port to forward (example 25565): " TARGET
+read -p "Enter REMOTE port (45001-46000): " PORT
+
+if ((PORT < PORT_START || PORT > PORT_END)); then
+echo "Invalid port range."
+sleep 2
+return
+fi
+
+if [[ -f "$STORE/$PORT.pid" ]]; then
+echo "Port already in use."
+sleep 2
+return
+fi
+
+(
+while true
+do
+sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no -N -R ${PORT}:localhost:${TARGET} $HOST
+echo "Tunnel $PORT disconnected. Reconnecting in 5s..."
+sleep 5
+done
+) > /dev/null 2>&1 &
+
+PID=$!
+
+echo $PID > "$STORE/$PORT.pid"
+echo $TARGET > "$STORE/$PORT.port"
+
+clear
+echo "================================="
+echo " PORT FORWARD CREATED"
+echo "================================="
+echo ""
+echo "Public Address:"
+echo "178.239.114.245:$PORT"
+echo ""
+echo "Forwarded To:"
+echo "127.0.0.1:$TARGET"
+echo ""
+echo "Tunnel running in background"
+echo ""
+
+read -p "Press Enter to return..."
+}
+
+delete_forward() {
+
+echo "Active Forwards:"
+echo ""
+
+for f in $STORE/*.pid; do
+[[ -e "$f" ]] || { echo "None"; break; }
+
+PORT=$(basename "$f" .pid)
+TARGET=$(cat "$STORE/$PORT.port")
+
+echo "178.239.114.245:$PORT -> 127.0.0.1:$TARGET"
+done
+
+echo ""
+read -p "Enter remote port to delete: " DEL
+
+if [[ -f "$STORE/$DEL.pid" ]]; then
+
+PID=$(cat "$STORE/$DEL.pid")
+kill $PID 2>/dev/null
+
+rm -f "$STORE/$DEL.pid" "$STORE/$DEL.port"
+
+echo "Forward removed."
+
+else
+echo "Port not found."
+fi
+
+sleep 2
+}
+
+delete_all() {
+
+for f in $STORE/*.pid; do
+[[ -e "$f" ]] || continue
+kill $(cat "$f") 2>/dev/null
+done
+
+rm -f $STORE/*
+
+echo "All forwards removed."
+sleep 2
+}
+
+show_ports() {
+
+echo "Port Status (45001-46000)"
+echo "--------------------------"
+
+for ((p=$PORT_START;p<=$PORT_END;p++)); do
+
+if [[ -f "$STORE/$p.pid" ]]; then
+TARGET=$(cat "$STORE/$p.port")
+echo "$p -> USED (localhost:$TARGET)"
+else
+echo "$p -> FREE"
+fi
+
+done
+
+echo ""
+read -p "Press Enter..."
+}
+
+while true
+do
+
+clear
+echo "=========== HYZEX PORT PANEL ==========="
+echo "1) Create Forward"
+echo "2) Delete Forward"
+echo "3) Delete ALL Forwards"
+echo "4) Show Port Status"
+echo "5) Exit"
+echo "========================================"
+
+read -p "Select option: " OPTION
+
+case $OPTION in
+
+1) create_tunnel ;;
+2) delete_forward ;;
+3) delete_all ;;
+4) show_ports ;;
+5) exit ;;
+
+*) echo "Invalid option"; sleep 1 ;;
+
+esac
+
+done
