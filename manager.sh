@@ -1,122 +1,104 @@
 #!/bin/bash
+# HYZEX SSH Tunnel Manager v2
+# Auto-restart tunnels, list, delete, and run in background
 
-SERVER="178.239.114.245"
-USER="tcp-proxy"
-PASSWORD="0"
-DATA_DIR="$HOME/.tunnel-manager"
+TUNNEL_DIR="$HOME/.hyzex_tunnels"
+mkdir -p "$TUNNEL_DIR"
 
-mkdir -p "$DATA_DIR"
+PROXY="178.239.114.245"
+ALLOWED_PORTS_START=30000
+ALLOWED_PORTS_END=31000
+PROXY_USER="tcp-proxy"
 
-install_deps() {
-if ! command -v autossh &> /dev/null; then
-echo "Installing autossh and sshpass..."
-sudo apt update
-sudo apt install autossh sshpass -y
-fi
-}
-
+# Function: Start a tunnel
 start_tunnel() {
-read -p "Public Port (30000-31000): " PUB
-read -p "Local Port (example 25565): " LOCAL
+    read -p "Public Port ($ALLOWED_PORTS_START-$ALLOWED_PORTS_END): " PUBLIC_PORT
+    read -p "Local Port (example 22): " LOCAL_PORT
 
-echo "Starting tunnel..."
+    if [[ $PUBLIC_PORT -lt $ALLOWED_PORTS_START || $PUBLIC_PORT -gt $ALLOWED_PORTS_END ]]; then
+        echo "Port out of allowed range!"
+        return
+    fi
 
-sshpass -p "$PASSWORD" autossh -M 0 -f -N \
--o StrictHostKeyChecking=no \
--R ${PUB}:localhost:${LOCAL} \
-${USER}@${SERVER}
+    TUNNEL_FILE="$TUNNEL_DIR/$PUBLIC_PORT.pid"
 
-echo "$LOCAL" > "$DATA_DIR/$PUB.port"
+    # Start tunnel in background with autossh for auto-reconnect
+    nohup autossh -M 0 -o "ServerAliveInterval=60" -o "ServerAliveCountMax=3" \
+        -N -R "$PUBLIC_PORT:localhost:$LOCAL_PORT" "$PROXY_USER@$PROXY" > "$TUNNEL_DIR/$PUBLIC_PORT.log" 2>&1 &
 
-echo ""
-echo "Tunnel started!"
-echo "Connect using:"
-echo "$SERVER:$PUB"
+    echo $! > "$TUNNEL_FILE"
+    echo "Tunnel started on $PROXY:$PUBLIC_PORT -> localhost:$LOCAL_PORT"
 }
 
+# Function: Stop a tunnel
 stop_tunnel() {
-read -p "Public Port to stop: " PORT
+    read -p "Public Port to stop: " PUBLIC_PORT
+    TUNNEL_FILE="$TUNNEL_DIR/$PUBLIC_PORT.pid"
 
-PID=$(ps aux | grep "R ${PORT}:localhost" | grep -v grep | awk '{print $2}')
-
-if [ ! -z "$PID" ]; then
-kill $PID
-echo "Tunnel stopped."
-else
-echo "Tunnel not running."
-fi
+    if [[ -f "$TUNNEL_FILE" ]]; then
+        kill $(cat "$TUNNEL_FILE") && rm -f "$TUNNEL_FILE"
+        echo "Tunnel on port $PUBLIC_PORT stopped."
+    else
+        echo "No tunnel found for port $PUBLIC_PORT"
+    fi
 }
 
+# Function: Delete a tunnel (stop + remove log)
 delete_tunnel() {
-read -p "Public Port to delete: " PORT
+    read -p "Public Port to delete: " PUBLIC_PORT
+    TUNNEL_FILE="$TUNNEL_DIR/$PUBLIC_PORT.pid"
+    LOG_FILE="$TUNNEL_DIR/$PUBLIC_PORT.log"
 
-PID=$(ps aux | grep "R ${PORT}:localhost" | grep -v grep | awk '{print $2}')
+    if [[ -f "$TUNNEL_FILE" ]]; then
+        kill $(cat "$TUNNEL_FILE") && rm -f "$TUNNEL_FILE"
+    fi
 
-if [ ! -z "$PID" ]; then
-kill $PID
-fi
+    if [[ -f "$LOG_FILE" ]]; then
+        rm -f "$LOG_FILE"
+    fi
 
-rm -f "$DATA_DIR/$PORT.port"
-
-echo "Tunnel deleted."
+    echo "Tunnel on port $PUBLIC_PORT deleted."
 }
 
+# Function: List active tunnels
 list_tunnels() {
-
-echo ""
-echo "Active tunnels:"
-echo "-------------------------"
-
-if [ -z "$(ls -A $DATA_DIR 2>/dev/null)" ]; then
-echo "No tunnels saved."
-return
-fi
-
-for file in $DATA_DIR/*.port
-do
-PORT=$(basename $file .port)
-LOCAL=$(cat $file)
-
-RUNNING=$(ps aux | grep "R ${PORT}:localhost:${LOCAL}" | grep -v grep)
-
-if [ ! -z "$RUNNING" ]; then
-STATUS="RUNNING"
-else
-STATUS="STOPPED"
-fi
-
-echo "$SERVER:$PORT -> localhost:$LOCAL [$STATUS]"
-
-done
+    echo "Active tunnels:"
+    for pidfile in $TUNNEL_DIR/*.pid; do
+        [[ -f "$pidfile" ]] || continue
+        PORT=$(basename "$pidfile" .pid)
+        PID=$(cat "$pidfile")
+        if ps -p $PID > /dev/null; then
+            echo "Port $PORT -> PID $PID (running)"
+        else
+            echo "Port $PORT -> not running"
+        fi
+    done
 }
 
-while true
-do
-clear
-echo "================================="
-echo "      HYZEX SSH Tunnel Manager"
-echo "================================="
-echo "Proxy: $SERVER"
-echo "Allowed Ports: 30000-31000"
-echo "================================="
-echo "1) Start Tunnel"
-echo "2) Stop Tunnel"
-echo "3) Delete Tunnel"
-echo "4) List Tunnels"
-echo "5) Exit"
-echo "================================="
+# Main menu
+while true; do
+    clear
+    echo "================================="
+    echo "      HYZEX SSH Tunnel Manager"
+    echo "================================="
+    echo "Proxy: $PROXY"
+    echo "Allowed Ports: $ALLOWED_PORTS_START-$ALLOWED_PORTS_END"
+    echo "================================="
+    echo "1) Start Tunnel"
+    echo "2) Stop Tunnel"
+    echo "3) Delete Tunnel"
+    echo "4) List Tunnels"
+    echo "5) Exit"
+    echo "================================="
+    read -p "Select option: " OPTION
 
-read -p "Select option: " OPTION
-
-case $OPTION in
-1) start_tunnel ;;
-2) stop_tunnel ;;
-3) delete_tunnel ;;
-4) list_tunnels ;;
-5) exit ;;
-*) echo "Invalid option";;
-esac
-
-echo ""
-read -p "Press ENTER to continue..."
+    case $OPTION in
+        1) start_tunnel ;;
+        2) stop_tunnel ;;
+        3) delete_tunnel ;;
+        4) list_tunnels ;;
+        5) exit 0 ;;
+        *) echo "Invalid option!" ;;
+    esac
+    read -p "Press ENTER to continue..."
 done
