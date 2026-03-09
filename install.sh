@@ -11,7 +11,7 @@ printf "Enter access key: "
 read -r KEY
 KEY="$(echo "$KEY" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 
-if [ "$KEY" != "tunnelmaster" ]; then
+if [ "$KEY" != "hyzex" ]; then
   echo ""
   echo "Invalid key."
   echo "Contact administrator."
