@@ -3,72 +3,101 @@
 SERVER="178.239.114.245"
 USER="tcp-proxy"
 PASSWORD="0"
+DATA_DIR="$HOME/.tunnel-manager"
 
-TUNNEL_DIR="$HOME/.tunnel-manager"
+mkdir -p "$DATA_DIR"
 
-mkdir -p $TUNNEL_DIR
+install_deps() {
+if ! command -v autossh &> /dev/null; then
+echo "Installing autossh and sshpass..."
+sudo apt update
+sudo apt install autossh sshpass -y
+fi
+}
 
 start_tunnel() {
-    read -p "Public Port (30000-31000): " PUB
-    read -p "Local Port (example 25565): " LOCAL
+read -p "Public Port (30000-31000): " PUB
+read -p "Local Port (example 25565): " LOCAL
 
-    echo "Starting tunnel $SERVER:$PUB -> localhost:$LOCAL"
+echo "Starting tunnel..."
 
-    sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no -N -R $PUB:localhost:$LOCAL $USER@$SERVER \
-        > $TUNNEL_DIR/$PUB.log 2>&1 &
+sshpass -p "$PASSWORD" autossh -M 0 -f -N \
+-o StrictHostKeyChecking=no \
+-R ${PUB}:localhost:${LOCAL} \
+${USER}@${SERVER}
 
-    echo $! > $TUNNEL_DIR/$PUB.pid
-    echo "$LOCAL" > $TUNNEL_DIR/$PUB.port
+echo "$LOCAL" > "$DATA_DIR/$PUB.port"
 
-    echo "Tunnel started!"
-    echo "Connect using: $SERVER:$PUB"
+echo ""
+echo "Tunnel started!"
+echo "Connect using:"
+echo "$SERVER:$PUB"
 }
 
 stop_tunnel() {
-    read -p "Tunnel Public Port: " PORT
+read -p "Public Port to stop: " PORT
 
-    if [ -f "$TUNNEL_DIR/$PORT.pid" ]; then
-        kill $(cat $TUNNEL_DIR/$PORT.pid) 2>/dev/null
-        rm -f $TUNNEL_DIR/$PORT.pid
-        echo "Tunnel stopped."
-    else
-        echo "Tunnel not found."
-    fi
+PID=$(ps aux | grep "R ${PORT}:localhost" | grep -v grep | awk '{print $2}')
+
+if [ ! -z "$PID" ]; then
+kill $PID
+echo "Tunnel stopped."
+else
+echo "Tunnel not running."
+fi
 }
 
 delete_tunnel() {
-    read -p "Tunnel Public Port to delete: " PORT
+read -p "Public Port to delete: " PORT
 
-    if [ -f "$TUNNEL_DIR/$PORT.pid" ]; then
-        kill $(cat $TUNNEL_DIR/$PORT.pid) 2>/dev/null
-    fi
+PID=$(ps aux | grep "R ${PORT}:localhost" | grep -v grep | awk '{print $2}')
 
-    rm -f $TUNNEL_DIR/$PORT.pid
-    rm -f $TUNNEL_DIR/$PORT.port
-    rm -f $TUNNEL_DIR/$PORT.log
+if [ ! -z "$PID" ]; then
+kill $PID
+fi
 
-    echo "Tunnel deleted."
+rm -f "$DATA_DIR/$PORT.port"
+
+echo "Tunnel deleted."
 }
 
 list_tunnels() {
-    echo "Active tunnels:"
-    echo "-------------------------"
 
-    for f in $TUNNEL_DIR/*.port; do
-        [ -e "$f" ] || { echo "No tunnels."; return; }
+echo ""
+echo "Active tunnels:"
+echo "-------------------------"
 
-        PUB=$(basename $f .port)
-        LOCAL=$(cat $f)
+if [ -z "$(ls -A $DATA_DIR 2>/dev/null)" ]; then
+echo "No tunnels saved."
+return
+fi
 
-        echo "$SERVER:$PUB  -> localhost:$LOCAL"
-    done
+for file in $DATA_DIR/*.port
+do
+PORT=$(basename $file .port)
+LOCAL=$(cat $file)
+
+RUNNING=$(ps aux | grep "R ${PORT}:localhost:${LOCAL}" | grep -v grep)
+
+if [ ! -z "$RUNNING" ]; then
+STATUS="RUNNING"
+else
+STATUS="STOPPED"
+fi
+
+echo "$SERVER:$PORT -> localhost:$LOCAL [$STATUS]"
+
+done
 }
 
 while true
 do
 clear
 echo "================================="
-echo "        SSH Tunnel Manager"
+echo "      HYZEX SSH Tunnel Manager"
+echo "================================="
+echo "Proxy: $SERVER"
+echo "Allowed Ports: 30000-31000"
 echo "================================="
 echo "1) Start Tunnel"
 echo "2) Stop Tunnel"
@@ -77,16 +106,17 @@ echo "4) List Tunnels"
 echo "5) Exit"
 echo "================================="
 
-read -p "Select option: " opt
+read -p "Select option: " OPTION
 
-case $opt in
+case $OPTION in
 1) start_tunnel ;;
 2) stop_tunnel ;;
 3) delete_tunnel ;;
 4) list_tunnels ;;
 5) exit ;;
-*) echo "Invalid option" ;;
+*) echo "Invalid option";;
 esac
 
-read -p "Press enter to continue..."
+echo ""
+read -p "Press ENTER to continue..."
 done
