@@ -1,167 +1,92 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-set -e
-
-REMOTE_USER="tcp-proxy"
-REMOTE_HOST="178.239.114.245"
+SERVER="178.239.114.245"
+USER="tcp-proxy"
 PASSWORD="0"
 
-PORT_START=30000
-PORT_END=31000
-LOGFILE="$HOME/tunnels.list"
+TUNNEL_DIR="$HOME/.tunnel-manager"
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+mkdir -p $TUNNEL_DIR
 
-touch $LOGFILE
+start_tunnel() {
+    read -p "Public Port (30000-31000): " PUB
+    read -p "Local Port (example 25565): " LOCAL
 
-install_deps() {
+    echo "Starting tunnel $SERVER:$PUB -> localhost:$LOCAL"
 
-if ! command -v autossh >/dev/null; then
-echo "Installing dependencies..."
-apt update -y
-apt install autossh sshpass curl -y
-fi
+    sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no -N -R $PUB:localhost:$LOCAL $USER@$SERVER \
+        > $TUNNEL_DIR/$PUB.log 2>&1 &
 
-}
+    echo $! > $TUNNEL_DIR/$PUB.pid
+    echo "$LOCAL" > $TUNNEL_DIR/$PUB.port
 
-auto_port() {
-
-for ((p=$PORT_START; p<=$PORT_END; p++))
-do
-if ! ss -tulpn | grep -q ":$p "; then
-echo $p
-return
-fi
-done
-
-echo "none"
-
-}
-
-create_tunnel() {
-
-read -p "Local port to expose: " TARGET
-
-PORT=$(auto_port)
-
-if [ "$PORT" = "none" ]; then
-echo -e "${RED}No free ports available${NC}"
-return
-fi
-
-sshpass -p "$PASSWORD" autossh \
--M 0 \
--o StrictHostKeyChecking=no \
--o ServerAliveInterval=30 \
--o ServerAliveCountMax=3 \
--N -R $PORT:localhost:$TARGET $REMOTE_USER@$REMOTE_HOST &
-
-PID=$!
-
-echo "$PID $PORT $TARGET" >> $LOGFILE
-
-echo ""
-echo -e "${GREEN}Tunnel started${NC}"
-echo "Remote: $REMOTE_HOST:$PORT -> localhost:$TARGET"
-echo ""
-
-}
-
-list_tunnels() {
-
-echo ""
-echo -e "${BLUE}Running Tunnels${NC}"
-echo "PID | REMOTE | LOCAL"
-echo "---------------------"
-
-while read line
-do
-PID=$(echo $line | awk '{print $1}')
-PORT=$(echo $line | awk '{print $2}')
-TARGET=$(echo $line | awk '{print $3}')
-
-if ps -p $PID >/dev/null
-then
-echo "$PID | $PORT | $TARGET"
-fi
-
-done < $LOGFILE
-
-echo ""
-
+    echo "Tunnel started!"
+    echo "Connect using: $SERVER:$PUB"
 }
 
 stop_tunnel() {
+    read -p "Tunnel Public Port: " PORT
 
-list_tunnels
-echo ""
-
-read -p "Enter PID to stop: " PID
-
-kill $PID 2>/dev/null
-sed -i "/^$PID /d" $LOGFILE
-
-echo -e "${RED}Tunnel stopped${NC}"
-
+    if [ -f "$TUNNEL_DIR/$PORT.pid" ]; then
+        kill $(cat $TUNNEL_DIR/$PORT.pid) 2>/dev/null
+        rm -f $TUNNEL_DIR/$PORT.pid
+        echo "Tunnel stopped."
+    else
+        echo "Tunnel not found."
+    fi
 }
 
-scan_ports() {
+delete_tunnel() {
+    read -p "Tunnel Public Port to delete: " PORT
 
-echo ""
-echo "Free ports ($PORT_START-$PORT_END):"
-echo "-----------------------"
+    if [ -f "$TUNNEL_DIR/$PORT.pid" ]; then
+        kill $(cat $TUNNEL_DIR/$PORT.pid) 2>/dev/null
+    fi
 
-for ((p=$PORT_START; p<=$PORT_END; p++))
-do
-if ! ss -tulpn | grep -q ":$p "; then
-echo "$p"
-fi
-done
+    rm -f $TUNNEL_DIR/$PORT.pid
+    rm -f $TUNNEL_DIR/$PORT.port
+    rm -f $TUNNEL_DIR/$PORT.log
 
-echo ""
-
+    echo "Tunnel deleted."
 }
 
-menu() {
+list_tunnels() {
+    echo "Active tunnels:"
+    echo "-------------------------"
+
+    for f in $TUNNEL_DIR/*.port; do
+        [ -e "$f" ] || { echo "No tunnels."; return; }
+
+        PUB=$(basename $f .port)
+        LOCAL=$(cat $f)
+
+        echo "$SERVER:$PUB  -> localhost:$LOCAL"
+    done
+}
 
 while true
 do
-
 clear
-
-echo -e "${GREEN}"
 echo "================================="
-echo "        TUNNEL MANAGER"
+echo "        SSH Tunnel Manager"
 echo "================================="
-echo -e "${NC}"
-
-echo "1) Create tunnel"
-echo "2) List tunnels"
-echo "3) Stop tunnel"
-echo "4) Scan free ports"
+echo "1) Start Tunnel"
+echo "2) Stop Tunnel"
+echo "3) Delete Tunnel"
+echo "4) List Tunnels"
 echo "5) Exit"
+echo "================================="
 
-echo ""
 read -p "Select option: " opt
 
 case $opt in
-
-1) create_tunnel ;;
-2) list_tunnels ;;
-3) stop_tunnel ;;
-4) scan_ports ;;
+1) start_tunnel ;;
+2) stop_tunnel ;;
+3) delete_tunnel ;;
+4) list_tunnels ;;
 5) exit ;;
-
+*) echo "Invalid option" ;;
 esac
 
-read -p "Press Enter to continue..."
-
+read -p "Press enter to continue..."
 done
-
-}
-
-install_deps
-menu
