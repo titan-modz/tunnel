@@ -3,8 +3,8 @@
 HOST="tcp-proxy@178.239.114.245"
 PASSWORD="0"
 
-PORT_START=30000
-PORT_END=31000
+PORT_START=20000
+PORT_END=21000
 
 STORE="$HOME/.hyzex_forwards"
 mkdir -p "$STORE"
@@ -12,7 +12,7 @@ mkdir -p "$STORE"
 create_tunnel() {
 
 read -p "Enter LOCAL port to forward (example 25565): " TARGET
-read -p "Enter REMOTE port (30000-31000): " PORT
+read -p "Enter REMOTE port (20000-21000): " PORT
 
 if ((PORT < PORT_START || PORT > PORT_END)); then
 echo "Invalid port range."
@@ -105,7 +105,7 @@ sleep 2
 
 show_ports() {
 
-echo "Port Status (30000-31000)"
+echo "Port Status (20000-21000)"
 echo "--------------------------"
 
 for ((p=$PORT_START;p<=$PORT_END;p++)); do
