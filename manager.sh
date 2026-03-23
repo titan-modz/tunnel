@@ -1,152 +1,121 @@
 #!/bin/bash
 
-HOST="tcp-proxy@178.239.114.245"
-PASSWORD="0"
+HOST="178.239.114.245"
+USER="tcp-proxy"
+PASS="0"
+PID_FILE="tunnels.pid"
 
-PORT_START=20000
-PORT_END=21000
-
-STORE="$HOME/.hyzex_forwards"
-mkdir -p "$STORE"
+touch $PID_FILE
 
 create_tunnel() {
+    read -p "Enter remote port (20000-21000): " RPORT
 
-read -p "Enter LOCAL port to forward (example 25565): " TARGET
-read -p "Enter REMOTE port (20000-21000): " PORT
+    if [[ -z "$RPORT" || $RPORT -lt 20000 || $RPORT -gt 21000 ]]; then
+        echo "❌ Invalid port range!"
+        return
+    fi
 
-if ((PORT < PORT_START || PORT > PORT_END)); then
-echo "Invalid port range."
-sleep 2
-return
-fi
+    # Check if already used
+    if grep -q "^$RPORT:" $PID_FILE; then
+        echo "⚠️ Port already in use!"
+        return
+    fi
 
-if [[ -f "$STORE/$PORT.pid" ]]; then
-echo "Port already in use."
-sleep 2
-return
-fi
+    read -p "Enter target port (e.g. 22, 25565): " TARGET_PORT
 
-(
-while true
-do
-sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no -N -R ${PORT}:localhost:${TARGET} $HOST
-echo "Tunnel $PORT disconnected. Reconnecting in 5s..."
-sleep 5
-done
-) > /dev/null 2>&1 &
+    if [[ -z "$TARGET_PORT" ]]; then
+        echo "❌ Target port cannot be empty!"
+        return
+    fi
 
-PID=$!
+    echo "🚀 Creating tunnel..."
+    echo "Remote: $HOST:$RPORT → localhost:$TARGET_PORT"
 
-echo $PID > "$STORE/$PORT.pid"
-echo $TARGET > "$STORE/$PORT.port"
+    nohup sshpass -p "$PASS" ssh \
+    -o StrictHostKeyChecking=no \
+    -o ServerAliveInterval=60 \
+    -o ServerAliveCountMax=3 \
+    -N -R ${RPORT}:localhost:${TARGET_PORT} ${USER}@${HOST} \
+    > /dev/null 2>&1 &
 
-clear
-echo "================================="
-echo " PORT FORWARD CREATED"
-echo "================================="
-echo ""
-echo "Public Address:"
-echo "178.239.114.245:$PORT"
-echo ""
-echo "Forwarded To:"
-echo "127.0.0.1:$TARGET"
-echo ""
-echo "Tunnel running in background"
-echo ""
+    PID=$!
+    echo "$RPORT:$PID:$TARGET_PORT" >> $PID_FILE
 
-read -p "Press Enter to return..."
+    echo "✅ Tunnel started in background (PID: $PID)"
 }
 
-delete_forward() {
+list_tunnels() {
+    echo ""
+    echo "📋 Active tunnels:"
+    echo "----------------------------"
 
-echo "Active Forwards:"
-echo ""
+    if [[ ! -s $PID_FILE ]]; then
+        echo "No tunnels found."
+        return
+    fi
 
-for f in $STORE/*.pid; do
-[[ -e "$f" ]] || { echo "None"; break; }
-
-PORT=$(basename "$f" .pid)
-TARGET=$(cat "$STORE/$PORT.port")
-
-echo "178.239.114.245:$PORT -> 127.0.0.1:$TARGET"
-done
-
-echo ""
-read -p "Enter remote port to delete: " DEL
-
-if [[ -f "$STORE/$DEL.pid" ]]; then
-
-PID=$(cat "$STORE/$DEL.pid")
-kill $PID 2>/dev/null
-
-rm -f "$STORE/$DEL.pid" "$STORE/$DEL.port"
-
-echo "Forward removed."
-
-else
-echo "Port not found."
-fi
-
-sleep 2
+    while IFS=: read RPORT PID TARGET_PORT
+    do
+        if ps -p $PID > /dev/null 2>&1; then
+            echo "🟢 $RPORT → localhost:$TARGET_PORT | PID: $PID"
+        else
+            echo "🔴 $RPORT → localhost:$TARGET_PORT | PID: $PID (DEAD)"
+        fi
+    done < $PID_FILE
 }
 
-delete_all() {
+delete_tunnel() {
+    read -p "Enter remote port to delete: " RPORT
 
-for f in $STORE/*.pid; do
-[[ -e "$f" ]] || continue
-kill $(cat "$f") 2>/dev/null
-done
+    if grep -q "^$RPORT:" $PID_FILE; then
+        PID=$(grep "^$RPORT:" $PID_FILE | cut -d: -f2)
 
-rm -f $STORE/*
+        kill $PID 2>/dev/null
+        sed -i "/^$RPORT:/d" $PID_FILE
 
-echo "All forwards removed."
-sleep 2
+        echo "❌ Tunnel on port $RPORT stopped."
+    else
+        echo "⚠️ Tunnel not found."
+    fi
 }
 
-show_ports() {
+kill_all() {
+    echo "🔥 Stopping all tunnels..."
 
-echo "Port Status (20000-21000)"
-echo "--------------------------"
+    while IFS=: read RPORT PID TARGET_PORT
+    do
+        kill $PID 2>/dev/null
+    done < $PID_FILE
 
-for ((p=$PORT_START;p<=$PORT_END;p++)); do
-
-if [[ -f "$STORE/$p.pid" ]]; then
-TARGET=$(cat "$STORE/$p.port")
-echo "$p -> USED (localhost:$TARGET)"
-else
-echo "$p -> FREE"
-fi
-
-done
-
-echo ""
-read -p "Press Enter..."
+    > $PID_FILE
+    echo "✅ All tunnels stopped."
 }
 
-while true
-do
+menu() {
+    while true
+    do
+        echo ""
+        echo "=================================="
+        echo "   🚀 PORT FORWARD MANAGER"
+        echo "=================================="
+        echo "1. Create Tunnel"
+        echo "2. List Tunnels"
+        echo "3. Delete Tunnel"
+        echo "4. Kill All Tunnels"
+        echo "5. Exit"
+        echo "=================================="
 
-clear
-echo "=========== HYZEX PORT PANEL ==========="
-echo "1) Create Forward"
-echo "2) Delete Forward"
-echo "3) Delete ALL Forwards"
-echo "4) Show Port Status"
-echo "5) Exit"
-echo "========================================"
+        read -p "Choose option: " CHOICE
 
-read -p "Select option: " OPTION
+        case $CHOICE in
+            1) create_tunnel ;;
+            2) list_tunnels ;;
+            3) delete_tunnel ;;
+            4) kill_all ;;
+            5) exit 0 ;;
+            *) echo "❌ Invalid option!" ;;
+        esac
+    done
+}
 
-case $OPTION in
-
-1) create_tunnel ;;
-2) delete_forward ;;
-3) delete_all ;;
-4) show_ports ;;
-5) exit ;;
-
-*) echo "Invalid option"; sleep 1 ;;
-
-esac
-
-done
+menu
