@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+REMOTE_USER="tcp-proxy"
+REMOTE_HOST="103.165.11.27"
+PASSWORD="0"
+
+create_tunnel() {
+    read -p "Enter localhost port to forward: " LOCAL_PORT
+    read -p "Make it public? (y/n): " pub
+
+    if [[ "$pub" == "y" ]]; then
+        BIND="0.0.0.0"
+    else
+        BIND="localhost"
+    fi
+
+    echo ""
+    echo "[*] Creating tunnel for localhost:${LOCAL_PORT} ..."
+    echo ""
+
+    stdbuf -oL sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no -v -N \
+    -R ${BIND}:0:localhost:${LOCAL_PORT} ${REMOTE_USER}@${REMOTE_HOST} 2>&1 | \
+    while read -r line; do
+        if echo "$line" | grep -q "Allocated port"; then
+            PORT=$(echo "$line" | grep -oE "[0-9]+$")
+            echo "[+] Forwarded Port: $PORT"
+            echo "[+] ${REMOTE_HOST}:${PORT} -> localhost:${LOCAL_PORT}"
+            echo ""
+        fi
+    done
+}
+
+while true; do
+    clear
+    echo "=========================="
+    echo "   Reverse Tunnel Menu"
+    echo "=========================="
+    echo "1) Create Tunnel"
+    echo "2) Exit"
+    echo "=========================="
+    read -p "Select option: " choice
+
+    case $choice in
+        1)
+            create_tunnel
+            ;;
+        2)
+            exit 0
+            ;;
+        *)
+            echo "Invalid option"
+            sleep 1
+            ;;
+    esac
+done
